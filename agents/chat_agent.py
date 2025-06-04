@@ -8,10 +8,12 @@ class ChatAgent:
     def __init__(self, model_name="gpt-3.5-turbo"):
         """Initialize the ChatAgent with specified model."""
         self.model = ChatOpenAI(model_name=model_name, temperature=0.7, streaming=True)
-        # Define required fields (these must be filled)
-        self.required_fields = ["name", "city", "days", "budget", "people", "kids", "health", "hobbies", "start_date"]
+        # Define required fields (these must be filled) - removed 'name' as it's not critical
+        self.required_fields = ["city", "days", "budget", "people", "kids", "health", "hobbies"]
+        # Optional fields that help with planning but aren't required to proceed
+        self.optional_fields = ["name", "start_date", "specificRequirements"]
         # Define all fields, including optional ones
-        self.all_fields = self.required_fields + ["specificRequirements"]
+        self.all_fields = self.required_fields + self.optional_fields
         self.conversation_history = []
         
     def _init_system_message(self):
@@ -44,31 +46,52 @@ class ChatAgent:
         if user_input and user_input.strip():
             self.conversation_history.append(HumanMessage(content=user_input))
         
+        # Check completion - be more flexible about what constitutes "complete"
+        missing_required = [f for f in self.required_fields if not state.get(f)]
+        
+        # Special handling for start_date - "not decided" is acceptable
+        start_date = state.get("start_date", "")
+        if start_date == "not decided":
+            state["start_date"] = "not decided"  # Ensure it's in state
+        
+        # Consider complete if we have the core travel info
+        core_fields = ["city", "days", "budget", "people"]
+        has_core_info = all(state.get(f) for f in core_fields)
+        
+        # More flexible completion - if we have core info and most other fields
+        is_complete = has_core_info and len(missing_required) <= 2
+        
         # Get AI response based on current state and conversation history
         messages = self.conversation_history.copy()
         messages.append(SystemMessage(content=f"""
         Current state: {json.dumps(state, ensure_ascii=False)}
         Required fields: {json.dumps(self.required_fields, ensure_ascii=False)}
-        Missing fields: {json.dumps([f for f in self.required_fields if not state.get(f)], ensure_ascii=False)}
+        Missing fields: {json.dumps(missing_required, ensure_ascii=False)}
+        Core travel info complete: {has_core_info}
+        Ready to proceed: {is_complete}
+        
         Please help the user complete the missing information in a natural way.
         Remember to acknowledge information that has already been provided.
         Tell the user that they can write "not decided" for the start date if they don't have a specific date in mind.
         Also pay attention to any specific requirements they mention and reflect these in your responses.
+        
+        If the user has provided the core travel information (city, days, budget, people), 
+        you can proceed even if some optional details are missing.
         """))
         
         try:
             response = self.model.stream(messages)
             return {
                 "stream": response,
-                "missing_fields": [f for f in self.required_fields if not state.get(f)],
-                "complete": len([f for f in self.required_fields if not state.get(f)]) == 0,
+                "missing_fields": missing_required,
+                "complete": is_complete,
                 "state": state.copy()
             }
         except Exception as e:
             print(f"Error getting AI response: {e}")
             return {
                 "stream": None,
-                "missing_fields": [f for f in self.required_fields if not state.get(f)],
+                "missing_fields": missing_required,
                 "complete": False,
                 "state": state.copy(),
                 "error": str(e)

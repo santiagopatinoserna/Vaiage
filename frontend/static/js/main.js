@@ -198,9 +198,13 @@ document.addEventListener('DOMContentLoaded', function() {
         // Create EventSource for streaming
         const params = new URLSearchParams({
             step: state.step,
-            user_input: message,
-            session_id: state.session_id || ''
+            user_input: message
         });
+        
+        // Only add session_id if it exists and is not null
+        if (state.session_id) {
+            params.append('session_id', state.session_id);
+        }
         
         // Add selected attractions if in recommend step
         if (state.step === 'recommend' && state.selectedAttractions.length > 0) {
@@ -248,23 +252,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (data.next_step) {
                     updateStepNav(data.next_step);
                 }
-                // 自动触发: 只有当上一步是 recommend，且新 step 是 strategy 时
-                if (prevStep === 'recommend' && state.step === 'strategy') {
-                    setTimeout(() => {
-                        processUserInput('Here are my selected attractions');
-                    }, 0);
-                }
+                
                 // Store session_id if provided
                 if (data.session_id) {
                     state.session_id = data.session_id;
                     console.log('[DEBUG] Updated session_id:', state.session_id);
                 }
+                
                 // Display or hide missing fields
                 if (data.missing_fields && data.missing_fields.length > 0) {
                     showMissingFields(data.missing_fields);
                 } else {
                     hideMissingFields();
                 }
+                
                 // Update state from response
                 if (data.state) {
                     console.log('[DEBUG] Updating state with:', data.state);
@@ -282,42 +283,20 @@ document.addEventListener('DOMContentLoaded', function() {
                         console.log('[DEBUG] Updated user_input_processed:', state.user_input_processed);
                     }
                 }
+                
                 // Update UI components
                 if (data.attractions) updateAttractions(data.attractions);
                 if (data.map_data) updateMap(data.map_data);
                 if (data.itinerary) updateItinerary(data.itinerary);
                 if (data.budget) updateBudget(data.budget);
                 if (data.response) updateConfirmation(data.response);
-                // if (data.rental_post) updateRentalPost(data.rental_post); // Remove UI update call
-                // 关键修改：如果进入 complete 阶段（即 route 阶段返回 next_step: 'complete'），直接渲染 itinerary 和 budget，不再发起新的请求
-                if (state.step === 'complete') {
-                    // 已经在本次响应中渲染 itinerary 和 budget，无需再发 step=complete 请求
-                    // 可以在此处添加提示或高亮，表示行程已生成
-                    addChatMessage('Your itinerary and budget have been generated! Check the left panel for details.', 'assistant');
-                }
-
+                
                 // If we have route data, draw it on the map
                 if (data.optimal_route) {
                     drawRoute(data.optimal_route);
                 }
 
                 console.log('[DEBUG] Final state:', state);
-
-                
-                if (state.step === 'strategy' && data.next_step === 'strategy') {
-                    const userInput = document.getElementById('user-input');
-                    if (userInput) {
-                        userInput.value = 'I am satisfied with your recommendation, let us go to next step';
-                        userInput.focus();
-                    }
-                }
-                if (prevStep === 'communication' && state.step === 'route') {
-                    const userInput = document.getElementById('user-input');
-                    if (userInput) {
-                        userInput.value = 'I am ready to go to next step';
-                        userInput.focus();
-                    }
-                }
             } else if (data.type === 'error') {
                 eventSource.close();
                 loadingSpinner.classList.add('d-none');
